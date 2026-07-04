@@ -1,0 +1,5 @@
+# Dépendances pour le clone 3D de Minecraft
+pygame==2.5.2
+ursina==6.0.0
+noise==1.2.2
+numpy==1.24.3
