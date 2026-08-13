@@ -44,6 +44,7 @@ app.get('/', (c) => {
   <meta name="description" content="VOXELCRAFT — moteur voxel original en WebGL 2 : génération procédurale multi-bruits, éclairage propagé, occlusion ambiante, physique AABB, artisanat et créatures.">
   <meta name="theme-color" content="#0b0d10">
   <title>VOXELCRAFT — moteur voxel WebGL 2</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link href="/static/css/style.css" rel="stylesheet">
 </head>
 <body>

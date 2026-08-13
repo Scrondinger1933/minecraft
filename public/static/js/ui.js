@@ -172,7 +172,15 @@
     if (type === 'chest') this.chest = data;
     this.el.panel.style.display = 'flex';
     this.render();
-    document.exitPointerLock && document.pointerLockElement && document.exitPointerLock();
+    // Sortie volontaire du verrou : on la signale au jeu (_exitByUI) afin que
+    // le gestionnaire `pointerlockchange` ne la confonde pas avec une perte
+    // fortuite, qui déclencherait à tort la mise en pause.
+    if (document.exitPointerLock && document.pointerLockElement) {
+      this.game._exitByUI = true;
+      document.exitPointerLock();
+      const g = this.game;
+      setTimeout(() => { g._exitByUI = false; }, 0);
+    }
   };
   UI.prototype.closePanel = function () {
     // renvoie les items du craft dans l'inventaire

@@ -743,8 +743,17 @@
         game.msg('F3 : informations de débogage · T : changer de mode');
         lastT = performance.now();
         acc = 0;
+        game.paused = false;              // la simulation doit tourner d'emblée
+        game.updatePauseUI();
         game.save(true);
-        glCanvas.requestPointerLock();
+
+        /* Le verrou de pointeur exige une activation transitoire : on ne peut
+         * pas le demander ici (callback asynchrone). On amène simplement le
+         * focus clavier sur le canvas — ZQSD/WASD fonctionnent aussitôt — et
+         * on invite au clic, qui acquerra le verrou dans son propre geste. */
+        glCanvas.setAttribute('tabindex', '0');
+        glCanvas.focus({ preventScroll: true });
+        game.msg('Cliquez sur la vue pour capturer la souris.');
       });
   }
 
@@ -805,12 +814,12 @@
     });
     btn('btn-quit', () => { game.save(true).then(() => root.location.reload()); });
     btn('btn-respawn', () => game.respawn());
-    btn('panel-close', () => { game.ui.closePanel(); glCanvas.requestPointerLock(); });
+    btn('panel-close', () => { game.ui.closePanel(); game.grabPointer(true); });
 
     // Clic sur le voile — mais non sur le panneau lui-même : fermeture.
     const pan = $('panel');
     if (pan) pan.addEventListener('mousedown', e => {
-      if (e.target === pan) { game.ui.closePanel(); glCanvas.requestPointerLock(); }
+      if (e.target === pan) { game.ui.closePanel(); game.grabPointer(true); }
     });
   }
 
@@ -864,13 +873,129 @@
     show('menu-home', true);
     rafId = requestAnimationFrame(frame);
 
+    // Banc d'essai des entrées, déclenché par ?selftest=1
+    try {
+      if (/[?&]selftest=1\b/.test(root.location.search)) setTimeout(selfTest, 400);
+    } catch (e) { /* location inaccessible : sans effet */ }
+
     root.addEventListener('beforeunload', () => { if (game && game.ready) game.save(true); });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && game && game.ready) game.save(true);
     });
   }
 
-  root.VCMain = { render, drawHUD, fillTileUV, boxMVP, startGame, parseSeed };
+  /* =====================================================================
+   *  Auto-test des entrées (?selftest=1)
+   *
+   *  Éprouve la chaîne réelle clavier → tick → position, et souris → yaw,
+   *  sans verrou de pointeur (le repli freeLook doit suffire). Les résultats
+   *  sont journalisés en console et déposés dans root.VCSELFTEST.
+   * ===================================================================== */
+  function selfTest() {
+    const out = [];
+    const ok = (n, c, d) => { out.push((c ? 'PASS' : 'FAIL') + ' — ' + n + (d ? ' :: ' + d : '')); };
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+
+    const key = (type, code) =>
+      document.dispatchEvent(new KeyboardEvent(type, { code, bubbles: true }));
+    const mouse = (type, opt) =>
+      glCanvas.dispatchEvent(new MouseEvent(type, Object.assign({ bubbles: true, cancelable: true, button: 0 }, opt)));
+
+    console.log('[SELFTEST] démarrage d\'un monde de test…');
+    startGame('selftest', 'Banc d\'essai', 1337, null);
+
+    const ready = () => new Promise(r => {
+      const t = setInterval(() => { if (game && game.ready) { clearInterval(t); r(); } }, 120);
+    });
+
+    return ready().then(async () => {
+      await wait(200);
+      ok('partie prête (game.ready)', !!game.ready);
+      ok('simulation non figée au démarrage (paused === false)', game.paused === false,
+        'paused=' + game.paused);
+      ok('focus clavier sur le canvas', document.activeElement === glCanvas,
+        'activeElement=' + (document.activeElement && document.activeElement.id));
+
+      /* ---- 1. Le clavier remplit bien le registre de touches ---------- */
+      key('keydown', 'KeyW');
+      ok('KeyW enregistrée dans game.keys', game.keys.KeyW === true);
+
+      /* ---- 2. Avancer modifie réellement la position ------------------ */
+      const p = game.player;
+      p.yaw = 0; p.pitch = 0; p.vx = p.vy = p.vz = 0;
+      const x0 = p.x, z0 = p.z;
+      for (let i = 0; i < 20; i++) game.tick();          // 1 s de simulation
+      const d = Math.hypot(p.x - x0, p.z - z0);
+      ok('avance sur 20 ticks (déplacement > 0.5 bloc)', d > 0.5, 'd=' + d.toFixed(3));
+      key('keyup', 'KeyW');
+      ok('KeyW relâchée', game.keys.KeyW === false);
+
+      /* ---- 3. Boucle rAF : tick() est bien appelé --------------------- */
+      const t0 = game.stats.playTime;
+      p.yaw = Math.PI / 2;
+      key('keydown', 'KeyW');
+      await wait(500);
+      key('keyup', 'KeyW');
+      ok('la boucle rAF exécute tick() (playTime progresse)',
+        game.stats.playTime > t0 + 0.2, 'Δ=' + (game.stats.playTime - t0).toFixed(3));
+
+      /* ---- 4. Souris SANS verrou : le repli freeLook doit agir -------- */
+      ok('aucun verrou de pointeur dans ce contexte', document.pointerLockElement !== glCanvas);
+      const yaw0 = p.yaw, pitch0 = p.pitch;
+      mouse('mousedown', { clientX: 400, clientY: 300 });
+      ok('freeLook armé par le clic maintenu', game.freeLook === true);
+      document.dispatchEvent(new MouseEvent('mousemove',
+        { bubbles: true, clientX: 500, clientY: 260 }));
+      ok('yaw modifié par la souris (repli)', Math.abs(p.yaw - yaw0) > 1e-6,
+        'Δyaw=' + (p.yaw - yaw0).toFixed(5));
+      ok('pitch modifié par la souris (repli)', Math.abs(p.pitch - pitch0) > 1e-6,
+        'Δpitch=' + (p.pitch - pitch0).toFixed(5));
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+      ok('freeLook désarmé au relâchement', game.freeLook === false);
+
+      /* ---- 5. pitch borné à ±90° ------------------------------------- */
+      mouse('mousedown', { clientX: 400, clientY: 300 });
+      for (let i = 0; i < 40; i++)
+        document.dispatchEvent(new MouseEvent('mousemove',
+          { bubbles: true, clientX: 400, clientY: 300 + (i + 1) * 200 }));
+      ok('pitch borné à -90°', p.pitch > -Math.PI / 2 - 1e-6 && p.pitch <= -Math.PI / 2 + 0.01,
+        'pitch=' + p.pitch.toFixed(4));
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+
+      /* ---- 6. Un refus de verrou ne met PAS la partie en pause -------- */
+      game.paused = false;
+      game.hadLock = false;
+      document.dispatchEvent(new Event('pointerlockchange'));
+      ok('refus de verrou sans mise en pause abusive', game.paused === false,
+        'paused=' + game.paused);
+
+      /* ---- 7. Perte de focus : aucune touche « collée » -------------- */
+      key('keydown', 'KeyA');
+      root.dispatchEvent(new Event('blur'));
+      ok('les touches sont relâchées à la perte de focus', !game.keys.KeyA);
+
+      /* ---- 8. Échap met en pause et gèle la simulation --------------- */
+      key('keydown', 'Escape');
+      ok('Échap met en pause', game.paused === true);
+      const t1 = game.stats.playTime;
+      await wait(300);
+      ok('la simulation est gelée en pause', Math.abs(game.stats.playTime - t1) < 1e-9);
+      key('keydown', 'Escape');
+      ok('Échap reprend la partie', game.paused === false);
+
+      const fails = out.filter(s => s.indexOf('FAIL') === 0);
+      out.forEach(s => console.log('[SELFTEST] ' + s));
+      console.log('[SELFTEST] BILAN ' + (out.length - fails.length) + '/' + out.length +
+        ' — ' + (fails.length ? 'ÉCHECS: ' + fails.length : 'TOUT PASSE'));
+      root.VCSELFTEST = { results: out, failures: fails.length };
+      return out;
+    }).catch(e => {
+      console.log('[SELFTEST] EXCEPTION ' + (e && e.stack ? e.stack : e));
+      root.VCSELFTEST = { error: String(e) };
+    });
+  }
+
+  root.VCMain = { render, drawHUD, fillTileUV, boxMVP, startGame, parseSeed, selfTest };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
