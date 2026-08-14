@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Vengeance à la Casse - Jeu 3D</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; }
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        #hud {
+            padding: 20px;
+            color: #0f0;
+            text-shadow: 0 0 5px #0f0;
+            font-size: 20px;
+            display: flex;
+            justify-content: space-between;
+        }
+        #story-box {
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid #f00;
+            color: #fff;
+            padding: 20px;
+            margin: 20px;
+            text-align: center;
+            font-size: 18px;
+            display: none; /* Caché par défaut */
+            pointer-events: auto;
+        }
+        #crosshair {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 20px; height: 20px;
+            border: 2px solid red;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+        .btn {
+            background: #f00; color: white; border: none; padding: 10px 20px;
+            font-size: 16px; cursor: pointer; margin-top: 10px;
+            pointer-events: auto;
+        }
+        .btn:hover { background: #900; }
+        #game-over {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            color: red;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            pointer-events: auto;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Interface Utilisateur -->
+<div id="ui-layer">
+    <div id="hud">
+        <div>SANTÉ: <span id="health-display">100</span>%</div>
+        <div>ENNEMIS RESTANTS: <span id="enemies-display">0</span></div>
+        <div>CHAPITRE: <span id="chapter-display">1</span></div>
+    </div>
+    <div id="crosshair"></div>
+</div>
+
+<!-- Boîte de dialogue pour l'histoire -->
+<div id="story-box">
+    <p id="story-text">...</p>
+    <button class="btn" onclick="nextChapter()">CONTINUER</button>
+</div>
+
+<!-- Écran de fin -->
+<div id="game-over">
+    <p id="end-message">GAME OVER</p>
+    <button class="btn" onclick="location.reload()">RECOMMENCER</button>
+</div>
+
+<!-- Importation de Three.js via CDN -->
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+// --- CONFIGURATION DU JEU ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB); // Ciel bleu
+scene.fog = new THREE.Fog(0x87CEEB, 20, 100);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// --- LUMIÈRES ---
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambientLight);
+const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+dirLight.position.set(50, 100, 50);
+dirLight.castShadow = true;
+dirLight.shadow.camera.left = -50;
+dirLight.shadow.camera.right = 50;
+dirLight.shadow.camera.top = 50;
+dirLight.shadow.camera.bottom = -50;
+scene.add(dirLight);
+
+// --- ENVIRONNEMENT (LA CASSE) ---
+// Sol
+const groundGeo = new THREE.PlaneGeometry(200, 200);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 1 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Décor (Obstacles style casse)
+const obstacles = [];
+function createScrap(x, z, type) {
+    let geo, mat, mesh;
+    if (type === 'cube') {
+        geo = new THREE.BoxGeometry(4, 4, 4);
+        mat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+        mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(x, 2, z);
+    } else if (type === 'cone') {
+        geo = new THREE.ConeGeometry(2, 6, 4);
+        mat = new THREE.MeshStandardMaterial({ color: 0x8B4513 }); // Rouille
+        mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(x, 3, z);
+    }
+    if(mesh) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        scene.add(mesh);
+        obstacles.push(mesh);
+    }
+}
+
+// Générer aléatoirement des débris
+for(let i=0; i<30; i++) {
+    const x = (Math.random() - 0.5) * 150;
+    const z = (Math.random() - 0.5) * 150;
+    if(Math.abs(x) > 10 || Math.abs(z) > 10) { // Éviter le centre de départ
+        createScrap(x, z, Math.random() > 0.5 ? 'cube' : 'cone');
+    }
+}
+
+// --- JOUEUR (VOITURE) ---
+const playerGroup = new THREE.Group();
+scene.add(playerGroup);
+
+// Châssis
+const carBodyGeo = new THREE.BoxGeometry(2, 1, 4);
+const carBodyMat = new THREE.MeshStandardMaterial({ color: 0xff0000 }); // Voiture rouge
+const carBody = new THREE.Mesh(carBodyGeo, carBodyMat);
+carBody.position.y = 1;
+carBody.castShadow = true;
+playerGroup.add(carBody);
+
+// Toit
+const carTopGeo = new THREE.BoxGeometry(1.8, 0.8, 2);
+const carTopMat = new THREE.MeshStandardMaterial({ color: 0xcc0000 });
+const carTop = new THREE.Mesh(carTopGeo, carTopMat);
+carTop.position.y = 1.8;
+carTop.position.z = -0.5;
+carTop.castShadow = true;
+playerGroup.add(carTop);
+
+// Pistolet (Tourelle)
+const gunGeo = new THREE.CylinderGeometry(0.2, 0.2, 1.5);
+const gunMat = new THREE.MeshStandardMaterial({ color: 0x000000 });
+const gun = new THREE.Mesh(gunGeo, gunMat);
+gun.rotation.x = Math.PI / 2;
+gun.position.set(0, 2.2, 1);
+playerGroup.add(gun);
+
+// Position initiale
+playerGroup.position.set(0, 0, 0);
+
+// Variables de mouvement
+let speed = 0;
+let angle = 0;
+const maxSpeed = 0.8;
+const acceleration = 0.02;
+const friction = 0.95;
+const turnSpeed = 0.06;
+
+// Inputs
+const keys = { w: false, a: false, s: false, d: false, space: false };
+
+window.addEventListener('keydown', (e) => {
+    if(e.key.toLowerCase() === 'w') keys.w = true;
+    if(e.key.toLowerCase() === 's') keys.s = true;
+    if(e.key.toLowerCase() === 'a') keys.a = true;
+    if(e.key.toLowerCase() === 'd') keys.d = true;
+    if(e.code === 'Space') shoot();
+});
+
+window.addEventListener('keyup', (e) => {
+    if(e.key.toLowerCase() === 'w') keys.w = false;
+    if(e.key.toLowerCase() === 's') keys.s = false;
+    if(e.key.toLowerCase() === 'a') keys.a = false;
+    if(e.key.toLowerCase() === 'd') keys.d = false;
+});
+
+// --- SYSTÈME DE TIR ---
+const bullets = [];
+const bulletSpeed = 2;
+
+function shoot() {
+    if(gameState !== 'playing') return;
+
+    const bulletGeo = new THREE.SphereGeometry(0.3, 8, 8);
+    const bulletMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+    const bullet = new THREE.Mesh(bulletGeo, bulletMat);
+    
+    // Position de départ (bout du canon)
+    const vector = new THREE.Vector3(0, 0, 1);
+    vector.applyAxisAngle(new THREE.Vector3(0, 1, 0), playerGroup.rotation.y);
+    
+    bullet.position.copy(playerGroup.position);
+    bullet.position.y += 2.2;
+    bullet.position.add(vector.clone().multiplyScalar(2));
+    
+    // Vélocité
+    bullet.userData.velocity = vector.multiplyScalar(bulletSpeed);
+    bullet.userData.life = 60; // Frames de vie
+    
+    scene.add(bullet);
+    bullets.push(bullet);
+}
+
+// --- ENNEMIS & IA ---
+const enemies = [];
+const enemySpeed = 0.3;
+
+function spawnEnemy() {
+    const enemyGroup = new THREE.Group();
+    
+    const eBodyGeo = new THREE.BoxGeometry(2, 1, 4);
+    const eBodyMat = new THREE.MeshStandardMaterial({ color: 0x0000ff }); // Voiture bleue ennemie
+    const eBody = new THREE.Mesh(eBodyGeo, eBodyMat);
+    eBody.position.y = 1;
+    eBody.castShadow = true;
+    enemyGroup.add(eBody);
+
+    // Position aléatoire loin du joueur
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 40 + Math.random() * 20;
+    enemyGroup.position.set(Math.cos(angle)*radius, 0, Math.sin(angle)*radius);
+    
+    enemyGroup.userData = { health: 3, id: Math.random() };
+    
+    scene.add(enemyGroup);
+    enemies.push(enemyGroup);
+    updateHUD();
+}
+
+// --- GESTION DE L'HISTOIRE ---
+let chapter = 1;
+let gameState = 'story'; // story, playing, gameover
+
+const storyData = {
+    1: {
+        text: "CHAPITRE 1 : LE RÉVEIL.\n\nTu te réveilles au milieu de la casse. Ta mémoire est floue, mais tu sais une chose : ils t'ont trahi. Ton ancienne équipe t'a laissé pour mort ici. Il est temps de se venger.",
+        action: () => {
+            spawnEnemy();
+            spawnEnemy();
+            gameState = 'playing';
+            document.getElementById('story-box').style.display = 'none';
+        }
+    },
+    2: {
+        text: "CHAPITRE 2 : LES CHIENS DE GARDE.\n\nLes premières voitures arrivent. Ce sont des sbires. Ils veulent s'assurer que tu ne sortes pas vivant de la casse. Montre-leur de quoi tu es capable !",
+        action: () => {
+            for(let i=0; i<3; i++) spawnEnemy();
+            gameState = 'playing';
+            document.getElementById('story-box').style.display = 'none';
+        }
+    },
+    3: {
+        text: "CHAPITRE 3 : LE BOSS DE LA CASSE.\n\nTu as survécu jusqu'ici. Mais le chef du gang arrive. C'est lui qui a ordonné ton exécution. Détruis-le et reprends ta liberté !",
+        action: () => {
+            // Boss plus gros (simulé par plusieurs ennemis rapides ou juste un dernier groupe)
+            for(let i=0; i<5; i++) spawnEnemy();
+            gameState = 'playing';
+            document.getElementById('story-box').style.display = 'none';
+        }
+    },
+    4: {
+        text: "VICTOIRE !\n\nLa casse est silencieuse. Tu es le seul maître à bord. La vengeance est accomplie.",
+        action: () => {
+            gameState = 'win';
+            document.getElementById('story-box').style.display = 'none';
+            document.getElementById('end-message').innerText = "VENGEANCE ACCOMPLIE";
+            document.getElementById('end-message').style.color = "#0f0";
+            document.getElementById('game-over').style.display = 'flex';
+        }
+    }
+};
+
+// Fonction globale pour le bouton HTML
+window.nextChapter = function() {
+    if(storyData[chapter]) {
+        storyData[chapter].action();
+        if(gameState === 'playing') chapter++; // Préparer le prochain chapitre
+    }
+};
+
+function triggerStory(chap) {
+    gameState = 'story';
+    document.getElementById('story-box').style.display = 'block';
+    document.getElementById('story-text').innerText = storyData[chap].text;
+    document.getElementById('chapter-display').innerText = chap;
+}
+
+// Démarrage de l'histoire
+setTimeout(() => triggerStory(1), 1000);
+
+// --- LOGIQUE DE JEU ---
+let playerHealth = 100;
+
+function updateHUD() {
+    document.getElementById('health-display').innerText = Math.floor(playerHealth);
+    document.getElementById('enemies-display').innerText = enemies.length;
+}
+
+function checkCollisions() {
+    // Balles vs Ennemis
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        for (let j = enemies.length - 1; j >= 0; j--) {
+            const e = enemies[j];
+            if (b.position.distanceTo(e.position) < 3) {
+                // Touché
+                e.userData.health--;
+                scene.remove(b);
+                bullets.splice(i, 1);
+                
+                // Effet de flash
+                e.children[0].material.emissive.setHex(0xffffff);
+                setTimeout(() => {
+                    if(e) e.children[0].material.emissive.setHex(0x000000);
+                }, 100);
+
+                if (e.userData.health <= 0) {
+                    scene.remove(e);
+                    enemies.splice(j, 1);
+                    updateHUD();
+                    
+                    // Vérifier progression histoire
+                    if(enemies.length === 0 && chapter < 4) {
+                        setTimeout(() => triggerStory(chapter), 1000);
+                    }
+                }
+                break; // Balle détruite
+            }
+        }
+    }
+
+    // Ennemis vs Joueur (Collision simple)
+    for (let e of enemies) {
+        if (e.position.distanceTo(playerGroup.position) < 3) {
+            playerHealth -= 0.5;
+            updateHUD();
+            if(playerHealth <= 0) {
+                gameState = 'gameover';
+                document.getElementById('end-message').innerText = "TU AS ÉTÉ ÉLIMINÉ";
+                document.getElementById('game-over').style.display = 'flex';
+            }
+        }
+    }
+}
+
+function updatePhysics() {
+    if (gameState !== 'playing') return;
+
+    // Mouvement Joueur
+    if (keys.w) speed += acceleration;
+    if (keys.s) speed -= acceleration;
+    
+    speed *= friction;
+    
+    if (Math.abs(speed) > 0.01) {
+        if (keys.a) angle += turnSpeed * Math.sign(speed);
+        if (keys.d) angle -= turnSpeed * Math.sign(speed);
+    }
+
+    playerGroup.rotation.y = angle;
+    playerGroup.position.x += Math.sin(angle) * speed;
+    playerGroup.position.z += Math.cos(angle) * speed;
+
+    // Limites du monde
+    if(playerGroup.position.x > 90) playerGroup.position.x = 90;
+    if(playerGroup.position.x < -90) playerGroup.position.x = -90;
+    if(playerGroup.position.z > 90) playerGroup.position.z = 90;
+    if(playerGroup.position.z < -90) playerGroup.position.z = -90;
+
+    // Caméra suit le joueur (vue troisième personne)
+    const relativeCameraOffset = new THREE.Vector3(0, 8, -15);
+    const cameraOffset = relativeCameraOffset.applyMatrix4(playerGroup.matrixWorld);
+    camera.position.lerp(cameraOffset, 0.1);
+    camera.lookAt(playerGroup.position);
+
+    // Mise à jour des balles
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        b.position.add(b.userData.velocity);
+        b.userData.life--;
+        if (b.userData.life <= 0) {
+            scene.remove(b);
+            bullets.splice(i, 1);
+        }
+    }
+
+    // IA Ennemis (Suivre le joueur)
+    enemies.forEach(e => {
+        e.lookAt(playerGroup.position);
+        e.translateZ(enemySpeed);
+    });
+
+    checkCollisions();
+}
+
+// Boucle d'animation
+function animate() {
+    requestAnimationFrame(animate);
+    updatePhysics();
+    renderer.render(scene, camera);
+}
+
+// Gestion du redimensionnement fenêtre
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+animate();
+
+</script>
+</body>
+</html>
