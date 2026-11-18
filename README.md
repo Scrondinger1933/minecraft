@@ -8,11 +8,19 @@
 
 > **Avertissement juridique.** Ce projet n'est pas un clone de *Minecraft* et ne peut pas l'être : les textures, sons, modèles et le code de Mojang sont protégés par le droit d'auteur. Tous les visuels sont ici **générés par code** (atlas de textures dessiné procéduralement au chargement), tous les sons sont **synthétisés** par la Web Audio API. Aucune ressource de Mojang n'est utilisée, ni reproduite, ni redistribuée.
 
+## L'ARÈNE ÉTEINTE — mode horreur
+
+Un second jeu, **autonome**, vit dans ce dépôt : [L'ARÈNE ÉTEINTE](docs/HORREUR.md),
+jeu d'horreur cinématique en 3D jouable à `/horreur/` — tour des arènes, sceaux à
+dissoudre, quatre créatures originales inspirées de la mythologie de la tour de
+Lavanville (aucun contenu sous droit). Même approche : 100 % procédural, zéro asset.
+
 ## Adresses
 
 | Ressource | Adresse |
 |---|---|
 | Développement (bac à sable) | `http://localhost:3000` |
+| Mode horreur | `/horreur/` — voir [docs/HORREUR.md](docs/HORREUR.md) |
 | Auto-test des entrées | `/?selftest=1` — résultats en console et dans `window.VCSELFTEST` |
 | Production Cloudflare Pages | *non déployé* |
 

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="description" content="L'ARÈNE ÉTEINTE — mode d'horreur voxel original inspiré de la lore urbaine de Lavanville. WebGL 2, physique balayée, IA de créatures, cinématique.">
+<title>L'ARÈNE ÉTEINTE — mode horreur</title>
+<style>
+  :root {
+    --bone: #d8d2c4;
+    --gore: #7a1f1f;
+    --sigil: #b0342f;
+    --ink: #05060a;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  body { font-family: Georgia, 'Times New Roman', serif; color: var(--bone); }
+  #h-gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: none; }
+
+  /* ============== lettrage cinéma ============== */
+  #h-cine { position: fixed; inset: 0; pointer-events: none; z-index: 30; display: none; }
+  #h-cine.active { display: block; }
+  #h-cine::before, #h-cine::after {
+    content: ''; position: absolute; left: 0; right: 0; height: 12%;
+    background: linear-gradient(#000 0%, #000 100%); transition: transform .9s cubic-bezier(.2,.7,.2,1);
+  }
+  #h-cine::before { top: 0; transform: translateY(-100%); }
+  #h-cine::after { bottom: 0; transform: translateY(100%); }
+  #h-cine.active::before { transform: translateY(0); }
+  #h-cine.active::after { transform: translateY(0); }
+  #h-cine-line {
+    position: absolute; bottom: 15%; left: 7%; right: 7%;
+    font-size: clamp(15px, 2.1vw, 25px); line-height: 1.5; text-align: left;
+    text-shadow: 0 2px 6px #000; color: #e8e2d2; min-height: 2.4em;
+  }
+  #h-cine-skip {
+    position: absolute; bottom: 3%; right: 4%; font-size: 12px; opacity: .55;
+    font-family: ui-monospace, monospace;
+  }
+
+  /* ================== HUD ====================== */
+  #h-hud { position: fixed; inset: 0; pointer-events: none; z-index: 20; }
+  #h-objective {
+    position: absolute; top: 4%; left: 50%; transform: translateX(-50%);
+    font-size: clamp(13px, 1.4vw, 17px); letter-spacing: .12em; text-transform: uppercase;
+    color: #cfc7b4; text-shadow: 0 1px 4px #000; opacity: .85; text-align: center; max-width: 70%;
+  }
+  #h-badges { position: absolute; top: 4.5%; right: 3%; display: flex; gap: 7px; }
+  #h-badges i {
+    width: 13px; height: 13px; border: 1px solid #6b6549; transform: rotate(45deg);
+    display: inline-block; background: transparent; box-shadow: 0 0 0 #000;
+  }
+  #h-badges i.on { background: #d9b353; border-color: #f0d78d; box-shadow: 0 0 9px #d9b35388; }
+  #h-meter {
+    position: absolute; bottom: 6%; left: 3%; width: 190px;
+    font-family: ui-monospace, monospace; font-size: 10px; letter-spacing: .14em;
+  }
+  .meter-row { margin-bottom: 7px; }
+  .meter-row span { opacity: .6; }
+  .meter-track { height: 5px; background: #ffffff14; margin-top: 3px; }
+  .meter-fill { height: 100%; background: #d9d2be; transition: width .18s linear; }
+  #m-battery { background: #d9b353; }
+  #m-stamina { background: #7aa06a; }
+  #m-fear { background: #b0342f; }
+  #m-hp { background: #c4423b; }
+  #h-crosshair {
+    position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; margin: -2px;
+    background: #ffffffaa; border-radius: 50%; box-shadow: 0 0 6px #000;
+  }
+  #h-interact {
+    position: absolute; bottom: 16%; left: 50%; transform: translateX(-50%);
+    font-size: clamp(13px, 1.5vw, 17px); color: #ece5d3; text-shadow: 0 2px 5px #000;
+    opacity: 0; transition: opacity .16s;
+  }
+  #h-altar {
+    position: absolute; bottom: 21%; left: 50%; transform: translateX(-50%);
+    width: 240px; display: none;
+  }
+  #h-altar-track { height: 4px; background: #ffffff18; }
+  #h-altar-fill { height: 100%; width: 0%; background: #d9b353; transition: width .1s linear; }
+  #h-toast {
+    position: absolute; bottom: 10.5%; left: 50%; transform: translateX(-50%);
+    max-width: 62%; text-align: center; font-size: clamp(13px, 1.6vw, 18px); font-style: italic;
+    color: #ded6c2; text-shadow: 0 2px 6px #000; opacity: 0; transition: opacity .5s;
+  }
+  #h-tab-journal {
+    position: absolute; bottom: 3%; right: 3%; font-size: 11px; opacity: .5;
+    font-family: ui-monospace, monospace; letter-spacing: .12em;
+  }
+
+  /* ================== écrans =================== */
+  .screen { position: fixed; inset: 0; z-index: 40; display: none; align-items: center; justify-content: center; }
+  .screen.active { display: flex; }
+  #h-menu { background: radial-gradient(120% 90% at 50% 0%, #10131c 0%, #05060a 62%); z-index: 60; }
+  #h-menu.active { display: flex; }
+  .card { width: min(480px, 88vw); padding: 44px 40px; border: 1px solid #2a2d36; background: #0a0c11ee; }
+  .card h1 {
+    font-size: clamp(30px, 5vw, 44px); letter-spacing: .17em; font-weight: 400;
+    color: #e6dfcd; margin-bottom: 6px;
+  }
+  .card h2 { font-size: 20px; letter-spacing: .12em; font-weight: 400; margin-bottom: 22px; color: #cfc7b4; }
+  .card .sub { font-size: 12px; letter-spacing: .3em; text-transform: uppercase; color: #8b8578; margin-bottom: 30px; }
+  .card p.lore { font-size: 14.5px; line-height: 1.75; color: #a9a293; margin-bottom: 26px; }
+  .btn {
+    display: block; width: 100%; padding: 13px 18px; margin-bottom: 10px;
+    background: transparent; border: 1px solid #3a3e49; color: #d8d2c4;
+    font-family: inherit; font-size: 15px; letter-spacing: .2em; text-transform: uppercase;
+    cursor: pointer; transition: all .18s ease;
+  }
+  .btn:hover { border-color: #d9b353; color: #f2ead4; background: #d9b3530e; }
+  .btn.primary { border-color: #b0342f; color: #eec4bd; }
+  .btn.primary:hover { border-color: #d4544e; background: #7a1f1f14; }
+  .note { font-size: 11.5px; line-height: 1.7; color: #7b7568; margin-top: 22px; }
+  .slider { display: flex; align-items: center; gap: 12px; margin: 10px 0; font-size: 12px; }
+  .slider input { flex: 1; accent-color: #b0342f; }
+
+  #h-journal {
+    position: fixed; inset: 0; z-index: 50; display: none;
+    background: #030406e8; padding: 8vh 12vw; overflow-y: auto;
+  }
+  #h-journal.active { display: block; }
+  #h-journal h2 { font-size: 14px; letter-spacing: .34em; text-transform: uppercase; color: #8b8578; margin-bottom: 26px; }
+  .jr-entry { margin-bottom: 30px; max-width: 640px; }
+  .jr-entry h3 { font-size: 16px; font-weight: 400; color: #d9b353; margin-bottom: 8px; letter-spacing: .06em; }
+  .jr-entry p { font-size: 14.5px; line-height: 1.8; color: #b3ac9d; }
+  .jr-close { position: fixed; top: 4vh; right: 6vw; font-size: 12px; color: #8b8578; font-family: ui-monospace, monospace; }
+
+  #h-death { background: #0a0303f2; }
+  #h-death h2 { color: #c4423b; }
+  #h-end { background: #04050ae9; }
+  #h-end[data-good="1"] h2 { color: #d9b353; }
+  #h-end .card, #h-death .card { text-align: center; }
+  #h-end-title, #h-death-title { margin-bottom: 14px; }
+  #h-end-text, #h-death-cause { margin-bottom: 26px; font-size: 15px; line-height: 1.7; color: #a9a293; }
+  #h-pause { background: #030406d9; }
+</style>
+</head>
+<body>
+
+<canvas id="h-gl"></canvas>
+
+<!-- ===================== HUD ===================== -->
+<div id="h-hud">
+  <div id="h-objective">—</div>
+  <div id="h-badges"><i></i><i></i><i></i><i></i></div>
+  <div id="h-meter">
+    <div class="meter-row"><span>LOUPE</span><div class="meter-track"><div id="m-battery" class="meter-fill" style="width:100%"></div></div></div>
+    <div class="meter-row"><span>SOUFFLE</span><div class="meter-track"><div id="m-stamina" class="meter-fill" style="width:100%"></div></div></div>
+    <div class="meter-row"><span>PEUR</span><div class="meter-track"><div id="m-fear" class="meter-fill" style="width:0%"></div></div></div>
+    <div class="meter-row"><span>VIE</span><div class="meter-track"><div id="m-hp" class="meter-fill" style="width:100%"></div></div></div>
+  </div>
+  <div id="h-crosshair"></div>
+  <div id="h-altar"><div id="h-altar-track"><div id="h-altar-fill"></div></div></div>
+  <div id="h-interact"></div>
+  <div id="h-toast"></div>
+  <div id="h-tab-journal">JOURNAL (0) · [J]</div>
+</div>
+
+<!-- ============== lettrage cinéma ============== -->
+<div id="h-cine">
+  <div id="h-cine-line"></div>
+  <div id="h-cine-skip">ENTRÉE — passer</div>
+</div>
+
+<!-- ================= journal ==================== -->
+<div id="h-journal">
+  <h2>JOURNAL DU SCEAUX-EXPERT</h2>
+  <div id="h-journal-list"></div>
+  <div class="jr-close">[J] fermer</div>
+</div>
+
+<!-- ================== menu ====================== -->
+<div id="h-menu" class="screen">
+  <div class="card">
+    <h1>L'ARÈNE ÉTEINTE</h1>
+    <div class="sub">mode horreur · voxel · webgl 2</div>
+    <p class="lore">La Ligue a condamné la Maison des Arènes après Lavanville.
+    Le premier sceau est au premier étage. La crypte respire encore.
+    œuvre originale : aucune ressource déposée, tout est synthétisé à l'exécution.</p>
+    <button id="btn-jouer" class="btn primary" type="button">Entrer dans la tour</button>
+    <div class="slider"><span>Souris</span><input id="btn-sens" type="range" min="0.3" max="2.5" step="0.1" value="1"></div>
+    <div class="slider"><span>Volume</span><input id="btn-vol" type="range" min="0" max="1" step="0.05" value="0.8"></div>
+    <p class="note"><b>Commandes</b> — ZQSD/WASD : bouger · Souris : regarder ·
+    Maj : courir (<i>du bruit…</i>) · Ctrl : s'accroupir (silencieux) ·
+    Espace : sauter · F / clic droit : loupe frontale · E : interagir
+    (allumer, lire, se cacher, retirer un badge) · J : journal · Échap : pause.
+    <br><br>Astuce : la Main Blanche meurt dans le faisceau tenue sur elle.
+    Le Souffle ne trouve que le bruit. La crypte s'ouvre après quatre badges.</p>
+    <p class="note"><a href="/" style="color:#8b8578">← retour au moteur VOXELCRAFT</a></p>
+  </div>
+</div>
+
+<!-- ================= pause ====================== -->
+<div id="h-pause" class="screen">
+  <div class="card">
+    <h2>La tour retient son souffle</h2>
+    <button id="btn-resume" class="btn primary">Reprendre</button>
+    <button id="btn-quit" class="btn">Abandonner (recommencer)</button>
+    <p class="note">Objet du monde : aucune sauvegarde — la peur ne dure qu'une session.</p>
+  </div>
+</div>
+
+<!-- ================== mort ====================== -->
+<div id="h-death" class="screen">
+  <div class="card">
+    <h2 id="h-death-title">Vous tombez</h2>
+    <p id="h-death-cause">—</p>
+    <button id="btn-retry" class="btn primary">Reprendre au dernier sceau</button>
+  </div>
+</div>
+
+<!-- ============== écran de fin ================== -->
+<div id="h-end" class="screen">
+  <div class="card">
+    <h2 id="h-end-title">—</h2>
+    <p id="h-end-text">—</p>
+    <button id="btn-rejouer" class="btn primary">Rejouer</button>
+  </div>
+</div>
+
+<script src="./js/hnoise.js"></script>
+<script src="./js/hworld.js"></script>
+<script src="./js/hmesh.js"></script>
+<script src="./js/hcollide.js"></script>
+<script src="./js/hrender.js"></script>
+<script src="./js/hent.js"></script>
+<script src="./js/haudio.js"></script>
+<script src="./js/hstory.js"></script>
+<script src="./js/hmain.js"></script>
+</body>
+</html>
