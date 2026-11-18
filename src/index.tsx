@@ -81,6 +81,7 @@ app.get('/', (c) => {
       <button id="btn-new" class="btn primary" type="button">Nouveau monde</button>
       <button id="btn-load" class="btn" type="button">Charger une partie</button>
       <button id="btn-settings" class="btn" type="button">Réglages</button>
+      <p class="menu-note"><a href="/horreur/">L'ARÈNE ÉTEINTE — mode horreur (autre jeu, même moteur d'esprit)</a></p>
       <p class="menu-note">
         Œuvre originale : aucun élément graphique ou sonore n’est emprunté à
         Mojang. Terrain, textures et sons sont synthétisés à l’exécution.
